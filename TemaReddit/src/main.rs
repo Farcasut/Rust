@@ -1,5 +1,5 @@
 
-use std::{collections::HashMap,thread::sleep,env, time::{UNIX_EPOCH, Duration}};
+use std::{collections::HashMap,thread::sleep,env, time::{UNIX_EPOCH, Duration}, fs::File};
 use regex::Regex;
 use chrono::prelude::DateTime;
 use chrono::Utc;
@@ -17,7 +17,11 @@ struct PostInfo
 {
     title:String,
     created:f64,
-    permalink:String
+    permalink:String,
+    url:String,
+    is_video:bool,
+    author:String
+
 }
 #[derive(Debug,Deserialize)]
 
@@ -44,7 +48,7 @@ fn check_params(args:Vec<String>)->Result<String, MyErrors>
     let path:String;
     let mut order=String::from("hot");
     let full_id=Regex::new(r#"^((https)|(http))(://www\.reddit\.com/r/)([a-zA-Z_]{3,21})$"#).unwrap();
-    let only_name=Regex::new(r#"^([A-Za-z_]{3,21})$"#).unwrap();
+    let only_name=Regex::new(r#"^([A-Za-z_0-9]{3,21})$"#).unwrap();
     let sort_by=Regex::new(r#"^((hot)|(new)|(top))$"#).unwrap();
     if size==3
     {
@@ -93,7 +97,13 @@ fn print_data(printed:&mut HashMap<String, bool>, data:Reddit)
             let d= UNIX_EPOCH +Duration::from_secs(i.data.created as u64);
             let datetime= DateTime::<Utc>::from(d);
             let timestamp=datetime.format("%d.%m.%Y %H:%M:%S").to_string();
-            print!("Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n", i.data.title, i.data.permalink, timestamp);     
+            print!("Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n", i.data.title, i.data.permalink, timestamp);
+         //   if !i.data.is_video 
+         //   {   
+         //       let mut file = File::create(r#"D:\image\"#.to_string()+&i.data.author+".jpg").unwrap();
+         //       let file_len = reqwest::blocking::get(&i.data.url).unwrap()
+         //       .copy_to(&mut file).unwrap();
+         //   }
         }
     }
 }
