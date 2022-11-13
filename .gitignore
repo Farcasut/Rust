@@ -23,3 +23,6 @@ gameOfLife/target/debug/deps/gameOfLife.pdb
 *.exe
 gameOfLife/target/debug/gameOfLife.d
 gameOfLife/target/debug/gameOfLife.pdb
+jsonandstuff/serde/target/debug/.fingerprint/itoa-33663f66f6f398e6/lib-itoa
+jsonandstuff/serde/target/debug/.fingerprint/itoa-9eb919ef6fe27c54/dep-lib-itoa
+jsonandstuff/serde/target/debug/.fingerprint/proc-macro2-7ed71ab3373a31ea/build-script-build-script-build
