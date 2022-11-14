@@ -22,6 +22,17 @@ struct Media{
     reddit_video:Option<RedditVideo>
 }
 #[derive(Debug,Deserialize)]
+
+struct RedditVideoPreview
+{
+    fallback_url:String
+}
+#[derive(Debug,Deserialize)]
+struct Preview
+{
+    reddit_video_preview:Option<RedditVideoPreview>
+}
+#[derive(Debug,Deserialize)]
 struct PostInfo
 {
     title:String,
@@ -30,7 +41,8 @@ struct PostInfo
     url:String,
     is_video:bool,
     author:String,
-    media:Option<Media>
+    media:Option<Media>,
+    preview:Option<Preview>
 
 }
 #[derive(Debug,Deserialize)]
@@ -99,7 +111,7 @@ fn get_data(path:&String)
 }
 fn print_data(printed:&mut HashSet<String>, data:Reddit,count:&mut u64)->Result<(), reqwest::Error>
 {
-    
+    let is_gif=Regex::new(r#"(gif)"#).unwrap();
     for i in data.data.children
     {
         let token=i.data.permalink.clone();
@@ -109,11 +121,16 @@ fn print_data(printed:&mut HashSet<String>, data:Reddit,count:&mut u64)->Result<
             let datetime= DateTime::<Utc>::from(d);
             let timestamp=datetime.format("%d.%m.%Y %H:%M:%S").to_string();
             print!("Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n", i.data.title, i.data.permalink, timestamp);
+            //make directory
+            //let directory=format!("D:image\\{}", i.data.author); #if you want every user to have a folder
+             let directory="D:image\\";
+             create_dir_all(&directory).unwrap();
             //maybe make a function for this
-            if !i.data.is_video 
-            {   let directory=format!("D:image\\{}", i.data.author);
-                create_dir_all(&directory).unwrap();
-                let filename=format!("{}\\{}.png", directory, count);
+            if !is_gif.is_match(&i.data.url)//daca nu are gif in nume inseamna ca fie e imagine fie e video
+            {
+            if !i.data.is_video //flag video
+            {   
+                let filename=format!("{}\\{}-{}.png", directory, i.data.author,count);
                 let mut file = File::create(filename).unwrap();
                 let _file_len = reqwest::blocking::get(&i.data.url)?
                 .copy_to(&mut file)?;
@@ -121,13 +138,31 @@ fn print_data(printed:&mut HashSet<String>, data:Reddit,count:&mut u64)->Result<
             }
             else 
             {
-                let directory=format!("D:image\\{}", i.data.author);
-                create_dir_all(&directory).unwrap();
-                let filename=format!("{}\\{}.mp4", directory, count);
+                let filename=format!("{}\\{}-{}.mp4", directory,i.data.author, count);
                 let mut file = File::create(filename).unwrap();
                 let _file_len = reqwest::blocking::get(&i.data.media.unwrap().reddit_video.unwrap().fallback_url)?
                 .copy_to(&mut file)?;
                 *count+=1;
+            }
+            }
+            else 
+            {
+                if i.data.preview.as_ref().unwrap().reddit_video_preview.is_some()
+                {
+                let filename=format!("{}\\{}.mp4", directory, count);
+                let mut file = File::create(filename).unwrap();
+                let _file_len = reqwest::blocking::get(&i.data.preview.unwrap().reddit_video_preview.unwrap().fallback_url)?
+                .copy_to(&mut file)?;
+                *count+=1;
+                }
+                else 
+                {
+                let filename=format!("{}\\{}.gif", directory, count);
+                let mut file = File::create(filename).unwrap();
+                let _file_len = reqwest::blocking::get(&i.data.url)?
+                .copy_to(&mut file)?;
+                *count+=1;
+                }
             }
         }
     }
