@@ -1,5 +1,5 @@
 
-use std::{collections::HashMap,thread::sleep,env, time::{UNIX_EPOCH, Duration}, fs::File};
+use std::{collections::{HashSet},thread::sleep,env, time::{UNIX_EPOCH, Duration}, fs::{File, create_dir_all}};
 use regex::Regex;
 use chrono::prelude::DateTime;
 use chrono::Utc;
@@ -11,7 +11,16 @@ enum MyErrors
     InvalidSubreddit,
     InvalidArguments
 }
-//////json structures
+//json structures
+#[derive(Debug,Deserialize)]
+struct RedditVideo
+{
+    fallback_url: String
+}
+#[derive(Debug,Deserialize)]
+struct Media{
+    reddit_video:Option<RedditVideo>
+}
 #[derive(Debug,Deserialize)]
 struct PostInfo
 {
@@ -20,7 +29,8 @@ struct PostInfo
     permalink:String,
     url:String,
     is_video:bool,
-    author:String
+    author:String,
+    media:Option<Media>
 
 }
 #[derive(Debug,Deserialize)]
@@ -63,7 +73,7 @@ fn check_params(args:Vec<String>)->Result<String, MyErrors>
     }
     else if only_name.is_match(&args[1]) 
     {
-        path=String::from("https://www.reddit.com/r/".to_string()+&args[1].clone()+"/"+&order+".json");
+        path=format!("https://www.reddit.com/r/{}/{}.json", args[1], order);
     }
     else
     {
@@ -74,46 +84,62 @@ fn check_params(args:Vec<String>)->Result<String, MyErrors>
 fn get_data(path:&String)
 {
  let time=time::Duration::from_secs(10);
- let mut printed:HashMap<String, bool>= HashMap::new();
-
+ let mut printed:HashSet<String>= HashSet::new();
+ let mut count:u64=0;
     loop {
-        let data=ureq::get(path).call().expect("msg").into_string().expect("2");
-        let data:Reddit=serde_json::from_str(&data).unwrap();
-        print_data(&mut printed, data);
-        sleep(time);
+        let data=ureq::get(path).call().unwrap().into_string().unwrap();
+        let reddit:Reddit=serde_json::from_str(&data).unwrap();
+        match print_data(&mut printed, reddit,&mut count)
+        {
+            Err(e) =>println!("{:?}",e),
+            Ok(())=> sleep(time)
+        }
     }
 
 }
-fn print_data(printed:&mut HashMap<String, bool>, data:Reddit)
+fn print_data(printed:&mut HashSet<String>, data:Reddit,count:&mut u64)->Result<(), reqwest::Error>
 {
+    
     for i in data.data.children
     {
-        let token=i.data.permalink.clone()+&i.data.title+&i.data.created.to_string();
-        printed.entry(token.clone()).or_insert(false);
-        let p=printed.get_mut(&token).expect("Err la get");
-        if *p==false
+        let token=i.data.permalink.clone();
+        if printed.insert(token)
         {
-            *p=true;
             let d= UNIX_EPOCH +Duration::from_secs(i.data.created as u64);
             let datetime= DateTime::<Utc>::from(d);
             let timestamp=datetime.format("%d.%m.%Y %H:%M:%S").to_string();
             print!("Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n", i.data.title, i.data.permalink, timestamp);
-         //   if !i.data.is_video 
-         //   {   
-         //       let mut file = File::create(r#"D:\image\"#.to_string()+&i.data.author+".jpg").unwrap();
-         //       let file_len = reqwest::blocking::get(&i.data.url).unwrap()
-         //       .copy_to(&mut file).unwrap();
-         //   }
+            //maybe make a function for this
+            if !i.data.is_video 
+            {   let directory=format!("D:image\\{}", i.data.author);
+                create_dir_all(&directory).unwrap();
+                let filename=format!("{}\\{}.png", directory, count);
+                let mut file = File::create(filename).unwrap();
+                let _file_len = reqwest::blocking::get(&i.data.url)?
+                .copy_to(&mut file)?;
+                *count+=1;
+            }
+            else 
+            {
+                let directory=format!("D:image\\{}", i.data.author);
+                create_dir_all(&directory).unwrap();
+                let filename=format!("{}\\{}.mp4", directory, count);
+                let mut file = File::create(filename).unwrap();
+                let _file_len = reqwest::blocking::get(&i.data.media.unwrap().reddit_video.unwrap().fallback_url)?
+                .copy_to(&mut file)?;
+                *count+=1;
+            }
         }
     }
+    return Ok(());
 }
 fn main() {
     let args: Vec<String>=env::args().collect();
     match check_params(args)
     {
-        Err(MyErrors::InvalidSubreddit)=>println!("3<=Length(name)<=21 && name=[a-zA-Z_]"),
+        Err(MyErrors::InvalidSubreddit)=>println!("The name has to be between 3 and 21 charachters long and the only special character allowed is the underscore\n"),
         Err(MyErrors::InvalidArguments) => println!("Format <subreddit> [<hot|new|top>]"),
         Ok(path)=>  get_data(&path)
     }
-  
+
 }
