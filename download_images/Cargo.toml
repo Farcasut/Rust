@@ -1,16 +1,12 @@
 [package]
-name = "TemaReddit"
+name = "download_iamges"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version="4", features = ["derive"]}
-regex = "1"
-ureq = "2.5.0"
-serde = "1"
-serde_derive = "1"
-serde_json = "1"
-chrono = "0.4.23"
 reqwest = { version = "0.10.0-alpha.2", features = ["blocking"] }
+imageproc = "0.23.0"
+blocking = "1.2.0"
+ureq = "2.5.0"

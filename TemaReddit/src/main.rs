@@ -1,180 +1,265 @@
+/*
+TODO
+    ADD option for saving
+    ADD support for multiple subreddits
+    ADD support for custom path
+✔  refactor the saving logic
+*/
 
-use std::{collections::{HashSet},thread::sleep,env, time::{UNIX_EPOCH, Duration}, fs::{File, create_dir_all}};
-use regex::Regex;
 use chrono::prelude::DateTime;
 use chrono::Utc;
 use core::time;
+use regex::Regex;
 use serde_derive::Deserialize;
+use clap::Parser;
+use std::{
+    collections::HashSet,
+    fs::{create_dir_all, File},
+    thread::sleep,
+    time::{Duration, UNIX_EPOCH}
+};
 #[derive(Debug)]
-enum MyErrors
+
+enum MyErrorsInit
 {
     InvalidSubreddit,
-    InvalidArguments
+    InvalidArguments,
+    RegexError(regex::Error),  
 }
+
+impl From<regex::Error> for MyErrorsInit
+{
+    fn from(error:regex::Error) ->Self
+    {
+        MyErrorsInit::RegexError(error)
+    }
+}
+
+enum MyErrors {
+   
+    Req(reqwest::Error),
+    IoError(std::io::Error),
+    UreqError(ureq::Error), 
+    SerdeJsonError(serde_json::Error)
+}
+
+impl From<serde_json::Error> for MyErrors
+{
+    fn from(error: serde_json::Error)->Self
+    {
+        MyErrors::SerdeJsonError(error)
+    }
+}
+
+impl From<ureq::Error> for MyErrors
+{
+    fn from(error: ureq::Error)->Self
+    {
+        MyErrors::UreqError(error)
+    }
+}
+
+impl From<reqwest::Error> for MyErrors {
+    fn from(error: reqwest::Error) -> Self {
+        MyErrors::Req(error)
+    }
+}
+
+impl From<std::io::Error> for MyErrors {
+    fn from(error: std::io::Error)-> Self
+    {
+        MyErrors::IoError(error)
+    }
+}
+
+
+
 //json structures
-#[derive(Debug,Deserialize)]
-struct RedditVideo
-{
-    fallback_url: String
+#[derive(Debug, Deserialize, Clone)]
+struct RedditVideo {
+    fallback_url: String,
 }
-#[derive(Debug,Deserialize)]
-struct Media{
-    reddit_video:Option<RedditVideo>
+#[derive(Debug, Deserialize, Clone)]
+struct Media {
+    reddit_video: Option<RedditVideo>,
 }
-#[derive(Debug,Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 
-struct RedditVideoPreview
-{
-    fallback_url:String
+struct RedditVideoPreview {
+    fallback_url: String,
 }
-#[derive(Debug,Deserialize)]
-struct Preview
-{
-    reddit_video_preview:Option<RedditVideoPreview>
+#[derive(Debug, Deserialize, Clone)]
+struct Preview {
+    reddit_video_preview: Option<RedditVideoPreview>,
 }
-#[derive(Debug,Deserialize)]
-struct PostInfo
-{
-    title:String,
-    created:f64,
-    permalink:String,
-    url:String,
-    is_video:bool,
-    author:String,
-    media:Option<Media>,
-    preview:Option<Preview>
+#[derive(Debug, Deserialize, Clone)]
+struct PostInfo {
+    title: String,
+    created: f64,
+    permalink: String,
+    url: String,
+    is_video: bool,
+    author: String,
+    media: Option<Media>,
+    preview: Option<Preview>,
+}
+#[derive(Debug, Deserialize, Clone)]
 
+struct Children {
+    data: PostInfo,
 }
-#[derive(Debug,Deserialize)]
-
-struct Children
-{
-    data:PostInfo
+#[derive(Debug, Deserialize, Clone)]
+struct Info {
+    children: Vec<Children>,
 }
-#[derive(Debug,Deserialize)]
-struct Info
-{
-    children:Vec<Children>
-}
-#[derive(Debug,Deserialize)]
-struct Reddit
-{
-    data:Info
+#[derive(Debug, Deserialize, Clone)]
+struct Reddit {
+    data: Info,
 }
 
-fn check_params(args:Vec<String>)->Result<String, MyErrors>
-{
-    let size=args.len();
-    if size<2
-       { return Err(MyErrors::InvalidArguments);}
-    let path:String;
-    let mut order=String::from("hot");
-    let full_id=Regex::new(r#"^((https)|(http))(://www\.reddit\.com/r/)([a-zA-Z_]{3,21})$"#).unwrap();
-    let only_name=Regex::new(r#"^([A-Za-z_0-9]{3,21})$"#).unwrap();
-    let sort_by=Regex::new(r#"^((hot)|(new)|(top))$"#).unwrap();
-    if size==3
+fn check_params(args: &Args) -> Result<String, MyErrorsInit> {
+  
+    let path: String;
+    let full_id =
+    Regex::new(r#"^((https)|(http))(://www\.reddit\.com/r/)([a-zA-Z_]{3,21})$"#)?;
+    let only_name = Regex::new(r#"^([A-Za-z_0-9]{3,21})$"#)?;
+    let sort_by = Regex::new(r#"^((hot)|(new)|(top))$"#)?;
+    if ! sort_by.is_match(&args.order)
     {
-        if sort_by.is_match(&args[2])
-        {
-            order=args[2].clone();
-        }
+        return Err(MyErrorsInit::InvalidArguments)
     }
-    if full_id.is_match(&args[1])
-    {
-        path=String::from(args[1].clone()+"/"+&order+".json");
+    if full_id.is_match(&args.reddit) {
+        path = String::from(args.reddit.clone() + "/" + &args.order + ".json");
+    } else if only_name.is_match(&args.reddit) {
+        path = format!("https://www.reddit.com/r/{}/{}.json", args.reddit, args.order);
+    } else {
+        return Err(MyErrorsInit::InvalidSubreddit);
     }
-    else if only_name.is_match(&args[1]) 
-    {
-        path=format!("https://www.reddit.com/r/{}/{}.json", args[1], order);
-    }
-    else
-    {
-        return Err(MyErrors::InvalidSubreddit);
-    }
-    return Ok(path)
+    return Ok(path);
+    
 }
-fn get_data(path:&String)
-{
- let time=time::Duration::from_secs(10);
- let mut printed:HashSet<String>= HashSet::new();
- let mut count:u64=0;
+fn get_data(path: &String, download: u8)-> Result<(), MyErrors> {
+    let time = time::Duration::from_secs(10);
+    let mut printed: HashSet<String> = HashSet::new();
+    let mut count: u64 = 0;
     loop {
-        let data=ureq::get(path).call().unwrap().into_string().unwrap();
-        let reddit:Reddit=serde_json::from_str(&data).unwrap();
-        match print_data(&mut printed, reddit,&mut count)
-        {
-            Err(e) =>println!("{:?}",e),
-            Ok(())=> sleep(time)
+        let data = ureq::get(path).call()?.into_string()?;
+        let reddit: Reddit = serde_json::from_str(&data)?;
+        print_data(&mut printed, reddit, &mut count, download)?;
+        sleep(time);
         }
-    }
-
 }
-fn print_data(printed:&mut HashSet<String>, data:Reddit,count:&mut u64)->Result<(), reqwest::Error>
+fn print_data(  printed: &mut HashSet<String>,   data: Reddit,   count: &mut u64,download:u8 ) -> Result<(), MyErrors> 
 {
-    let is_gif=Regex::new(r#"(gif)"#).unwrap();
-    for i in data.data.children
-    {
-        let token=i.data.permalink.clone();
-        if printed.insert(token)
-        {
-            let d= UNIX_EPOCH +Duration::from_secs(i.data.created as u64);
-            let datetime= DateTime::<Utc>::from(d);
-            let timestamp=datetime.format("%d.%m.%Y %H:%M:%S").to_string();
-            print!("Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n", i.data.title, i.data.permalink, timestamp);
+    let is_gif = Regex::new(r#"(gif)"#).unwrap();
+    for i in data.data.children {
+        let token = i.data.permalink.clone();
+        if printed.insert(token) {
+            let d = UNIX_EPOCH + Duration::from_secs(i.data.created as u64);
+            let datetime = DateTime::<Utc>::from(d);
+            let timestamp = datetime.format("%d.%m.%Y %H:%M:%S").to_string();
+            print!(
+                "Titlu:{}\nLink: www.reddit.com{}\nTime: {}\n",
+                i.data.title, i.data.permalink, timestamp
+            );
             //make directory
-            //let directory=format!("D:image\\{}", i.data.author); #if you want every user to have a folder
-             let directory="D:image\\";
-             create_dir_all(&directory).unwrap();
+            let directory = "D:image\\";
+            create_dir_all(&directory)?;
             //maybe make a function for this
-            if !is_gif.is_match(&i.data.url)//daca nu are gif in nume inseamna ca fie e imagine fie e video
+        if download != 0
+          { 
+             if !is_gif.is_match(&i.data.url)
+            //daca nu are gif in nume inseamna ca fie e imagine fie e video
             {
-            if !i.data.is_video //flag video
-            {   
-                let filename=format!("{}\\{}-{}.png", directory, i.data.author,count);
-                let mut file = File::create(filename).unwrap();
-                let _file_len = reqwest::blocking::get(&i.data.url)?
-                .copy_to(&mut file)?;
-                *count+=1;
-            }
-            else 
-            {
-                let filename=format!("{}\\{}-{}.mp4", directory,i.data.author, count);
-                let mut file = File::create(filename).unwrap();
-                let _file_len = reqwest::blocking::get(&i.data.media.unwrap().reddit_video.unwrap().fallback_url)?
-                .copy_to(&mut file)?;
-                *count+=1;
-            }
-            }
-            else 
-            {
-                if i.data.preview.as_ref().unwrap().reddit_video_preview.is_some()
+                if !i.data.is_video
+                //flag video
                 {
-                let filename=format!("{}\\{}.mp4", directory, count);
-                let mut file = File::create(filename).unwrap();
-                let _file_len = reqwest::blocking::get(&i.data.preview.unwrap().reddit_video_preview.unwrap().fallback_url)?
-                .copy_to(&mut file)?;
-                *count+=1;
+                    save_data(&i.clone(), "png", count, directory, &i.data.url)?;
+                } else {
+                    save_data(
+                        &i.clone(),
+                        "mp4",
+                        count,
+                        directory,
+                        &i.data.media.unwrap().reddit_video.unwrap().fallback_url,
+                    )?;
                 }
-                else 
+            } else {
+                if i.data
+                    .preview
+                    .as_ref()
+                    .unwrap()
+                    .reddit_video_preview
+                    .is_some()
                 {
-                let filename=format!("{}\\{}.gif", directory, count);
-                let mut file = File::create(filename).unwrap();
-                let _file_len = reqwest::blocking::get(&i.data.url)?
-                .copy_to(&mut file)?;
-                *count+=1;
+                    save_data(
+                        &i.clone(),
+                        "mp4",
+                        count,
+                        directory,
+                        &i.data
+                            .preview
+                            .unwrap()
+                            .reddit_video_preview.unwrap()
+                            .fallback_url,
+                    )?;
+             
+                } else {
+                    save_data(&i, "gif", count, directory, &i.data.url)?;
                 }
+            }
             }
         }
     }
     return Ok(());
 }
-fn main() {
-    let args: Vec<String>=env::args().collect();
-    match check_params(args)
-    {
-        Err(MyErrors::InvalidSubreddit)=>println!("The name has to be between 3 and 21 charachters long and the only special character allowed is the underscore\n"),
-        Err(MyErrors::InvalidArguments) => println!("Format <subreddit> [<hot|new|top>]"),
-        Ok(path)=>  get_data(&path)
-    }
 
+
+fn save_data(
+    current: &Children,
+    format: &str,
+    count: &mut u64,
+    directory: &str,
+    link: &String
+) -> Result<(), MyErrors> {
+    let filename = format!(
+        "{}\\{}-{}.{}",
+        directory, current.data.author, count, format
+    );
+    let mut file = File::create(filename)?;
+    let _file_len = reqwest::blocking::get(link)?.copy_to(&mut file)?;
+    *count += 1;
+    return Ok(());
+}
+
+#[derive(Parser)]
+#[command(version, about = "Arguments")]
+struct Args {
+   ///Name of the person to greet
+   #[arg(short, long)]
+   reddit: String,
+   ///Number of times to greet
+   #[arg(short, default_value = "hot")]
+   order: String,
+   #[arg(short, default_value_t = 0)]
+   download: u8
+}
+
+fn main() {
+    //let args: Vec<String> = env::args().collect();
+    let args = Args::parse();
+    match check_params(&args)
+    { 
+        Err(MyErrorsInit::InvalidSubreddit)=>println!("The name has to be between 3 and 21 charachters long and the only special character allowed is the underscore\n"),
+        Err(MyErrorsInit::InvalidArguments) => println!("The arguments should be -r|--reddit subreddit [-o <new|hot|top>] [-d <0|1>]"),
+        Err(MyErrorsInit::RegexError(x))=>{eprintln!("{:?}", x);}
+        Ok(path)=> match get_data(&path, args.download)
+        {
+            Err(MyErrors::Req(x)) => {eprintln!("{:?}", x);},
+            Err(MyErrors::IoError(x))=>{eprintln!("{:?}", x);},
+            Err(MyErrors::UreqError(x))=>{eprintln!("{:?}", x);} ,
+            Err(MyErrors::SerdeJsonError(x))=>{eprintln!("{:?}", x);} ,
+            Ok(()) => println!("program finished🏁")
+        }
+    }
 }
