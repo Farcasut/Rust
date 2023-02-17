@@ -1,10 +1,4 @@
-/*
-TODO
-    ADD option for saving
-    ADD support for multiple subreddits
-    ADD support for custom path
-✔  refactor the saving logic
-*/
+
 
 use chrono::prelude::DateTime;
 use chrono::Utc;
@@ -165,11 +159,9 @@ fn print_data(  printed: &mut HashSet<String>,   data: Reddit,   count: &mut u64
             //make directory
             let directory = "D:image\\";
             create_dir_all(&directory)?;
-            //maybe make a function for this
         if download != 0
           { 
              if !is_gif.is_match(&i.data.url)
-            //daca nu are gif in nume inseamna ca fie e imagine fie e video
             {
                 if !i.data.is_video
                 //flag video
